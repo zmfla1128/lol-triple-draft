@@ -5,6 +5,9 @@ const { Server } = require("socket.io");
 
 const PORT = 4000;
 const HOST = "0.0.0.0";
+const MATCH_MIN = 1;
+const MATCH_MAX = 999;
+const MATCH_CAPACITY = 10;
 const PICK_ORDER = ["BLUE", "RED", "RED", "BLUE", "BLUE", "RED", "RED", "BLUE", "BLUE", "RED"];
 const FALLBACK_VERSION = "16.9.1";
 const FALLBACK_CHAMPIONS = [
@@ -30,6 +33,12 @@ let championCatalog = Object.fromEntries(
 for (const custom of CUSTOM_CHAMPIONS) {
   championCatalog[custom.id] = custom;
   if (!championPool.includes(custom.id)) championPool.push(custom.id);
+}
+
+const matches = new Map();
+
+function getRoomName(code) {
+  return `match:${code}`;
 }
 
 function pickRandomThree(pool) {
@@ -60,16 +69,51 @@ function createInitialState() {
   };
 }
 
-let gameState = createInitialState();
-
-function broadcastState() {
-  io.emit("state:update", gameState);
+function createMatch(code) {
+  return {
+    code,
+    sockets: new Set(),
+    gameState: createInitialState()
+  };
 }
 
-function refreshOfferedChampions() {
-  const nextOffer = pickRandomThree(gameState.unseenPool);
-  gameState.offeredChampions = nextOffer;
-  gameState.unseenPool = gameState.unseenPool.filter((c) => !nextOffer.includes(c));
+function broadcastMatchState(code) {
+  const match = matches.get(code);
+  if (!match) return;
+  io.to(getRoomName(code)).emit("state:update", match.gameState);
+}
+
+function broadcastMatchInfo(code) {
+  const match = matches.get(code);
+  if (!match) return;
+  io.to(getRoomName(code)).emit("match:update", {
+    code,
+    participantCount: match.sockets.size,
+    capacity: MATCH_CAPACITY
+  });
+}
+
+function refreshOfferedChampions(match) {
+  const nextOffer = pickRandomThree(match.gameState.unseenPool);
+  match.gameState.offeredChampions = nextOffer;
+  match.gameState.unseenPool = match.gameState.unseenPool.filter((c) => !nextOffer.includes(c));
+}
+
+function leaveMatch(socket) {
+  const code = socket.data.matchCode;
+  if (!code) return;
+  const match = matches.get(code);
+  socket.leave(getRoomName(code));
+  socket.data.matchCode = null;
+  socket.data.selectedTeam = null;
+  if (!match) return;
+
+  match.sockets.delete(socket.id);
+  if (match.sockets.size === 0) {
+    matches.delete(code);
+    return;
+  }
+  broadcastMatchInfo(code);
 }
 
 async function loadChampionData() {
@@ -81,7 +125,6 @@ async function loadChampionData() {
 
     const ids = Object.keys(en.data);
     const nextCatalog = {};
-
     for (const id of ids) {
       nextCatalog[id] = {
         id,
@@ -97,8 +140,12 @@ async function loadChampionData() {
     championVersion = latest;
     championPool = ids;
     championCatalog = nextCatalog;
-    gameState = createInitialState();
-    broadcastState();
+
+    for (const match of matches.values()) {
+      match.gameState = createInitialState();
+      broadcastMatchState(match.code);
+    }
+
     console.log(`Champion data loaded: ${latest}, ${ids.length} champions (with custom)`);
   } catch (error) {
     console.error("Failed to load champion data from Data Dragon. Using fallback list.", error?.message || error);
@@ -106,43 +153,95 @@ async function loadChampionData() {
 }
 
 io.on("connection", (socket) => {
+  socket.data.matchCode = null;
   socket.data.selectedTeam = null;
-  socket.emit("state:update", gameState);
-  socket.emit("team:selected", { team: null });
+
+  socket.on("match:join", ({ code }) => {
+    const parsed = Number(code);
+    if (!Number.isInteger(parsed) || parsed < MATCH_MIN || parsed > MATCH_MAX) {
+      socket.emit("match:error", { message: "방 번호는 1~999 사이 숫자여야 합니다." });
+      return;
+    }
+
+    if (socket.data.matchCode === parsed) {
+      const existing = matches.get(parsed);
+      if (existing) {
+        socket.emit("match:joined", { code: parsed });
+        socket.emit("state:update", existing.gameState);
+        broadcastMatchInfo(parsed);
+      }
+      return;
+    }
+
+    leaveMatch(socket);
+
+    let match = matches.get(parsed);
+    if (!match) {
+      match = createMatch(parsed);
+      matches.set(parsed, match);
+    }
+    if (match.sockets.size >= MATCH_CAPACITY) {
+      socket.emit("match:error", { message: "해당 방은 이미 10명입니다." });
+      return;
+    }
+
+    match.sockets.add(socket.id);
+    socket.data.matchCode = parsed;
+    socket.data.selectedTeam = null;
+    socket.join(getRoomName(parsed));
+
+    socket.emit("match:joined", { code: parsed });
+    socket.emit("team:selected", { team: null });
+    socket.emit("state:update", match.gameState);
+    broadcastMatchInfo(parsed);
+  });
 
   socket.on("team:select", ({ team }) => {
+    if (!socket.data.matchCode) return;
     if (!["BLUE", "RED"].includes(team)) return;
     socket.data.selectedTeam = team;
     socket.emit("team:selected", { team });
   });
 
   socket.on("draft:pick", ({ champion }) => {
-    if (gameState.phase !== "DRAFT") return;
+    const code = socket.data.matchCode;
+    if (!code) return;
+    const match = matches.get(code);
+    if (!match) return;
+    const state = match.gameState;
+
+    if (state.phase !== "DRAFT") return;
     if (!socket.data.selectedTeam) return;
-    if (socket.data.selectedTeam !== gameState.currentTeam) return;
-    if (!gameState.offeredChampions.includes(champion)) return;
+    if (socket.data.selectedTeam !== state.currentTeam) return;
+    if (!state.offeredChampions.includes(champion)) return;
 
-    const team = gameState.currentTeam;
-    gameState.teams[team].push(champion);
-    gameState.turnIndex += 1;
+    const team = state.currentTeam;
+    state.teams[team].push(champion);
+    state.turnIndex += 1;
 
-    if (gameState.turnIndex >= gameState.pickOrder.length) {
-      gameState.phase = "SWAP";
-      gameState.currentTeam = null;
-      gameState.offeredChampions = [];
+    if (state.turnIndex >= state.pickOrder.length) {
+      state.phase = "SWAP";
+      state.currentTeam = null;
+      state.offeredChampions = [];
     } else {
-      gameState.currentTeam = gameState.pickOrder[gameState.turnIndex];
-      refreshOfferedChampions();
+      state.currentTeam = state.pickOrder[state.turnIndex];
+      refreshOfferedChampions(match);
     }
 
-    broadcastState();
+    broadcastMatchState(code);
   });
 
   socket.on("swap:move", ({ team, fromIndex, toIndex }) => {
-    if (gameState.phase !== "SWAP") return;
+    const code = socket.data.matchCode;
+    if (!code) return;
+    const match = matches.get(code);
+    if (!match) return;
+    const state = match.gameState;
+
+    if (state.phase !== "SWAP") return;
     if (!["BLUE", "RED"].includes(team)) return;
 
-    const arr = gameState.teams[team];
+    const arr = state.teams[team];
     if (!Array.isArray(arr)) return;
     if (fromIndex < 0 || fromIndex >= arr.length) return;
     if (toIndex < 0 || toIndex >= arr.length) return;
@@ -151,13 +250,22 @@ io.on("connection", (socket) => {
     const next = [...arr];
     const [moved] = next.splice(fromIndex, 1);
     next.splice(toIndex, 0, moved);
-    gameState.teams[team] = next;
-    broadcastState();
+    state.teams[team] = next;
+
+    broadcastMatchState(code);
   });
 
   socket.on("game:reset", () => {
-    gameState = createInitialState();
-    broadcastState();
+    const code = socket.data.matchCode;
+    if (!code) return;
+    const match = matches.get(code);
+    if (!match) return;
+    match.gameState = createInitialState();
+    broadcastMatchState(code);
+  });
+
+  socket.on("disconnect", () => {
+    leaveMatch(socket);
   });
 });
 

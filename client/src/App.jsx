@@ -53,24 +53,75 @@ function TeamPanel({ state, team, picks, phase, onSwap }) {
 export default function App() {
   const [state, setState] = useState(null);
   const [selectedTeam, setSelectedTeam] = useState(null);
+  const [matchCodeInput, setMatchCodeInput] = useState("");
+  const [joinedCode, setJoinedCode] = useState(null);
+  const [participantCount, setParticipantCount] = useState(0);
+  const [capacity, setCapacity] = useState(10);
+  const [matchError, setMatchError] = useState("");
 
   useEffect(() => {
     const onState = (nextState) => setState(nextState);
     const onTeamSelected = ({ team }) => setSelectedTeam(team);
+    const onMatchJoined = ({ code }) => {
+      setJoinedCode(code);
+      setMatchError("");
+    };
+    const onMatchUpdate = ({ participantCount: count, capacity: cap }) => {
+      setParticipantCount(count);
+      setCapacity(cap);
+    };
+    const onMatchError = ({ message }) => setMatchError(message || "방 입장에 실패했습니다.");
+
     socket.on("state:update", onState);
     socket.on("team:selected", onTeamSelected);
+    socket.on("match:joined", onMatchJoined);
+    socket.on("match:update", onMatchUpdate);
+    socket.on("match:error", onMatchError);
+
     return () => {
       socket.off("state:update", onState);
       socket.off("team:selected", onTeamSelected);
+      socket.off("match:joined", onMatchJoined);
+      socket.off("match:update", onMatchUpdate);
+      socket.off("match:error", onMatchError);
     };
   }, []);
 
   const pickCount = useMemo(() => (!state ? 0 : state.teams.BLUE.length + state.teams.RED.length), [state]);
 
+  const handleJoinMatch = () => {
+    const trimmed = matchCodeInput.trim();
+    if (!trimmed) return;
+    socket.emit("match:join", { code: Number(trimmed) });
+  };
+
   const handleTeamSelect = (team) => {
     setSelectedTeam(team);
     socket.emit("team:select", { team });
   };
+
+  if (!joinedCode) {
+    return (
+      <main className="page">
+        <h1>LoL 트리플 드래프트</h1>
+        <section className="offers">
+          <h3>방 번호 입력 (1~999)</h3>
+          <div className="team-choice">
+            <input
+              type="number"
+              min="1"
+              max="999"
+              value={matchCodeInput}
+              onChange={(e) => setMatchCodeInput(e.target.value)}
+              placeholder="예: 777"
+            />
+            <button className="choice blue" onClick={handleJoinMatch}>입장</button>
+          </div>
+          {matchError && <p className="turn-wait">{matchError}</p>}
+        </section>
+      </main>
+    );
+  }
 
   if (!state) return <div className="loading">서버에 연결 중...</div>;
 
@@ -79,7 +130,8 @@ export default function App() {
       <main className="page">
         <h1>LoL 트리플 드래프트</h1>
         <section className="offers">
-          <h3>시작 전 팀을 선택하세요</h3>
+          <h3>방 {joinedCode} 참가자: {participantCount} / {capacity}</h3>
+          <h3>팀을 선택하세요</h3>
           <div className="team-choice">
             <button className="choice blue" onClick={() => handleTeamSelect("BLUE")}>블루 팀</button>
             <button className="choice red" onClick={() => handleTeamSelect("RED")}>레드 팀</button>
@@ -101,6 +153,8 @@ export default function App() {
     <main className="page">
       <h1>LoL 트리플 드래프트</h1>
       <div className="status">
+        <p><strong>방 번호:</strong> {joinedCode}</p>
+        <p><strong>인원:</strong> {participantCount} / {capacity}</p>
         <p><strong>단계:</strong> {PHASE_LABELS[state.phase] || state.phase}</p>
         <p><strong>현재 턴:</strong> {state.currentTeam ? TEAM_LABELS[state.currentTeam] : "-"}</p>
         <p><strong>내 팀:</strong> {TEAM_LABELS[selectedTeam]}</p>
