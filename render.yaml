@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: lol-triple-draft-server
+    runtime: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: node index.js
+    plan: free

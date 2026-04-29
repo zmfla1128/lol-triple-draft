@@ -28,3 +28,16 @@ npm run dev
 - 선택된 챔피언은 풀에서 제거되고 중복 선택이 불가능합니다.
 - 10픽 완료 후 SWAP 단계로 전환됩니다.
 - SWAP 단계에서 같은 팀 내부 순서 변경이 가능합니다.
+
+## 배포 (Render + Vercel)
+
+1. Render에서 백엔드 배포
+- 서비스 타입: Web Service
+- Root Directory: `server`
+- Build Command: `npm install`
+- Start Command: `node index.js`
+
+2. Vercel에서 프론트 배포
+- Root Directory: `client`
+- 환경변수 추가:
+  - `VITE_SOCKET_URL` = Render 백엔드 URL (예: `https://your-server.onrender.com`)
