@@ -53,6 +53,7 @@ function TeamPanel({ state, team, picks, phase, selectedTeam, onSwap }) {
 export default function App() {
   const [state, setState] = useState(null);
   const [currentTime, setCurrentTime] = useState(Date.now());
+  const [hasEarlyFinishVote, setHasEarlyFinishVote] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState(null);
   const [matchCodeInput, setMatchCodeInput] = useState("");
   const [joinedCode, setJoinedCode] = useState(null);
@@ -61,7 +62,10 @@ export default function App() {
   const [matchError, setMatchError] = useState("");
 
   useEffect(() => {
-    const onState = (nextState) => setState(nextState);
+    const onState = (nextState) => {
+      setCurrentTime(Date.now());
+      setState(nextState);
+    };
     const onTeamSelected = ({ team }) => setSelectedTeam(team);
     const onMatchJoined = ({ code }) => {
       setJoinedCode(code);
@@ -78,6 +82,7 @@ export default function App() {
       setMatchCodeInput("");
     };
     const onMatchError = ({ message }) => setMatchError(message || "방 입장에 실패했습니다.");
+    const onVoteStatus = ({ hasVoted }) => setHasEarlyFinishVote(hasVoted);
 
     socket.on("state:update", onState);
     socket.on("team:selected", onTeamSelected);
@@ -85,6 +90,7 @@ export default function App() {
     socket.on("match:update", onMatchUpdate);
     socket.on("match:left", onMatchLeft);
     socket.on("match:error", onMatchError);
+    socket.on("swap:vote-status", onVoteStatus);
 
     return () => {
       socket.off("state:update", onState);
@@ -93,6 +99,7 @@ export default function App() {
       socket.off("match:update", onMatchUpdate);
       socket.off("match:left", onMatchLeft);
       socket.off("match:error", onMatchError);
+      socket.off("swap:vote-status", onVoteStatus);
     };
   }, []);
 
@@ -120,6 +127,10 @@ export default function App() {
 
   const handleBackToMatchCode = () => {
     socket.emit("match:leave");
+  };
+
+  const handleEarlyFinishVote = () => {
+    socket.emit("swap:vote");
   };
 
   if (!joinedCode) {
@@ -203,6 +214,17 @@ export default function App() {
       {state.phase === "SWAP" && (
         <section className="offers">
           <h3>스왑 단계: 내 팀 챔피언 순서를 변경하세요 ({swapSecondsRemaining}초 남음)</h3>
+          <div className="early-finish">
+            <button className="reset" onClick={handleEarlyFinishVote}>
+              {hasEarlyFinishVote ? "조기 종료 투표 취소" : "조기 종료 투표"}
+            </button>
+            <span>찬성 {state.earlyFinishVoteCount || 0} / {state.earlyFinishVotesRequired || 1}</span>
+          </div>
+        </section>
+      )}
+      {state.phase === "COMPLETE" && (
+        <section className="offers">
+          <h3>{state.swapEndedByVote ? "조기 종료 투표로 스왑이 종료되었습니다." : "스왑 시간이 종료되었습니다."}</h3>
         </section>
       )}
       <div className="teams">

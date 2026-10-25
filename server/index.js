@@ -65,6 +65,7 @@ function createInitialState() {
     currentTeam: PICK_ORDER[0],
     offeredChampions: firstOffer,
     unseenPool: unseenPool.filter((c) => !firstOffer.includes(c)),
+    seenChampions: [...firstOffer],
     swapEndsAt: null,
     championVersion,
     championCatalog
@@ -75,15 +76,28 @@ function createMatch(code) {
   return {
     code,
     sockets: new Set(),
+    earlyFinishVotes: new Set(),
     swapTimer: null,
     gameState: createInitialState()
+  };
+}
+
+function getEarlyFinishVotesRequired(match) {
+  return Math.floor(match.sockets.size / 2) + 1;
+}
+
+function getClientState(match) {
+  return {
+    ...match.gameState,
+    earlyFinishVoteCount: match.earlyFinishVotes.size,
+    earlyFinishVotesRequired: getEarlyFinishVotesRequired(match)
   };
 }
 
 function broadcastMatchState(code) {
   const match = matches.get(code);
   if (!match) return;
-  io.to(getRoomName(code)).emit("state:update", match.gameState);
+  io.to(getRoomName(code)).emit("state:update", getClientState(match));
 }
 
 function broadcastMatchInfo(code) {
@@ -97,15 +111,20 @@ function broadcastMatchInfo(code) {
 }
 
 function refreshOfferedChampions(match) {
-  const nextOffer = pickRandomThree(match.gameState.unseenPool);
-  match.gameState.offeredChampions = nextOffer;
-  match.gameState.unseenPool = match.gameState.unseenPool.filter((c) => !nextOffer.includes(c));
+  const state = match.gameState;
+  const unavailable = new Set([...(state.seenChampions || []), ...state.teams.BLUE, ...state.teams.RED]);
+  const candidatePool = state.unseenPool.filter((champion) => !unavailable.has(champion));
+  const nextOffer = pickRandomThree(candidatePool);
+  state.offeredChampions = nextOffer;
+  state.seenChampions = [...new Set([...(state.seenChampions || []), ...nextOffer])];
+  state.unseenPool = candidatePool.filter((champion) => !nextOffer.includes(champion));
 }
 
-function finishSwapPhase(match) {
+function finishSwapPhase(match, endedByVote = false) {
   if (match.gameState.phase !== "SWAP") return;
   match.gameState.phase = "COMPLETE";
   match.gameState.swapEndsAt = null;
+  match.gameState.swapEndedByVote = endedByVote;
   match.swapTimer = null;
   broadcastMatchState(match.code);
 }
@@ -126,11 +145,13 @@ function leaveMatch(socket) {
   if (!match) return;
 
   match.sockets.delete(socket.id);
+  match.earlyFinishVotes.delete(socket.id);
   if (match.sockets.size === 0) {
     if (match.swapTimer) clearTimeout(match.swapTimer);
     matches.delete(code);
     return;
   }
+  if (match.gameState.phase === "SWAP") broadcastMatchState(code);
   broadcastMatchInfo(code);
 }
 
@@ -161,6 +182,7 @@ async function loadChampionData() {
 
     for (const match of matches.values()) {
       if (match.swapTimer) clearTimeout(match.swapTimer);
+      match.earlyFinishVotes.clear();
       match.gameState = createInitialState();
       broadcastMatchState(match.code);
     }
@@ -186,7 +208,8 @@ io.on("connection", (socket) => {
       const existing = matches.get(parsed);
       if (existing) {
         socket.emit("match:joined", { code: parsed });
-        socket.emit("state:update", existing.gameState);
+        socket.emit("state:update", getClientState(existing));
+        socket.emit("swap:vote-status", { hasVoted: existing.earlyFinishVotes.has(socket.id) });
         broadcastMatchInfo(parsed);
       }
       return;
@@ -211,7 +234,8 @@ io.on("connection", (socket) => {
 
     socket.emit("match:joined", { code: parsed });
     socket.emit("team:selected", { team: null });
-    socket.emit("state:update", match.gameState);
+    socket.emit("state:update", getClientState(match));
+    socket.emit("swap:vote-status", { hasVoted: false });
     broadcastMatchInfo(parsed);
   });
 
@@ -225,6 +249,26 @@ io.on("connection", (socket) => {
     if (!["BLUE", "RED"].includes(team)) return;
     socket.data.selectedTeam = team;
     socket.emit("team:selected", { team });
+  });
+
+  socket.on("swap:vote", () => {
+    const code = socket.data.matchCode;
+    if (!code) return;
+    const match = matches.get(code);
+    if (!match || match.gameState.phase !== "SWAP") return;
+
+    if (match.earlyFinishVotes.has(socket.id)) {
+      match.earlyFinishVotes.delete(socket.id);
+    } else {
+      match.earlyFinishVotes.add(socket.id);
+    }
+
+    socket.emit("swap:vote-status", { hasVoted: match.earlyFinishVotes.has(socket.id) });
+    if (match.earlyFinishVotes.size >= getEarlyFinishVotesRequired(match)) {
+      finishSwapPhase(match, true);
+      return;
+    }
+    broadcastMatchState(code);
   });
 
   socket.on("draft:pick", ({ champion }) => {
@@ -247,6 +291,8 @@ io.on("connection", (socket) => {
       state.phase = "SWAP";
       state.currentTeam = null;
       state.offeredChampions = [];
+      state.swapEndedByVote = false;
+      match.earlyFinishVotes.clear();
       startSwapTimer(match);
     } else {
       state.currentTeam = state.pickOrder[state.turnIndex];
@@ -291,6 +337,7 @@ io.on("connection", (socket) => {
     const match = matches.get(code);
     if (!match) return;
     if (match.swapTimer) clearTimeout(match.swapTimer);
+    match.earlyFinishVotes.clear();
     match.gameState = createInitialState();
     broadcastMatchState(code);
   });
