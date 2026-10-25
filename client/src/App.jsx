@@ -15,7 +15,7 @@ const championImage = (state, championId) => {
   return `https://ddragon.leagueoflegends.com/cdn/${version}/img/champion/${meta.id}.png`;
 };
 
-function TeamPanel({ state, team, picks, phase, onSwap }) {
+function TeamPanel({ state, team, picks, phase, selectedTeam, onSwap }) {
   return (
     <section className={`team-panel ${team.toLowerCase()}`}>
       <h2>{TEAM_LABELS[team] || team}</h2>
@@ -36,7 +36,7 @@ function TeamPanel({ state, team, picks, phase, onSwap }) {
                   <span className="empty-slot">미선택</span>
                 )}
               </span>
-              {phase === "SWAP" && championId && (
+              {phase === "SWAP" && selectedTeam === team && championId && (
                 <span className="swap-buttons">
                   <button disabled={idx === 0} onClick={() => onSwap(team, idx, idx - 1)}>위</button>
                   <button disabled={idx === ROLE_LABELS.length - 1 || !picks[idx + 1]} onClick={() => onSwap(team, idx, idx + 1)}>아래</button>
@@ -70,12 +70,19 @@ export default function App() {
       setParticipantCount(count);
       setCapacity(cap);
     };
+    const onMatchLeft = () => {
+      setJoinedCode(null);
+      setSelectedTeam(null);
+      setParticipantCount(0);
+      setMatchCodeInput("");
+    };
     const onMatchError = ({ message }) => setMatchError(message || "방 입장에 실패했습니다.");
 
     socket.on("state:update", onState);
     socket.on("team:selected", onTeamSelected);
     socket.on("match:joined", onMatchJoined);
     socket.on("match:update", onMatchUpdate);
+    socket.on("match:left", onMatchLeft);
     socket.on("match:error", onMatchError);
 
     return () => {
@@ -83,6 +90,7 @@ export default function App() {
       socket.off("team:selected", onTeamSelected);
       socket.off("match:joined", onMatchJoined);
       socket.off("match:update", onMatchUpdate);
+      socket.off("match:left", onMatchLeft);
       socket.off("match:error", onMatchError);
     };
   }, []);
@@ -98,6 +106,10 @@ export default function App() {
   const handleTeamSelect = (team) => {
     setSelectedTeam(team);
     socket.emit("team:select", { team });
+  };
+
+  const handleBackToMatchCode = () => {
+    socket.emit("match:leave");
   };
 
   if (!joinedCode) {
@@ -136,6 +148,7 @@ export default function App() {
             <button className="choice blue" onClick={() => handleTeamSelect("BLUE")}>블루 팀</button>
             <button className="choice red" onClick={() => handleTeamSelect("RED")}>레드 팀</button>
           </div>
+          <button className="reset" onClick={handleBackToMatchCode}>방 번호 다시 입력</button>
         </section>
       </main>
     );
@@ -183,10 +196,11 @@ export default function App() {
         </section>
       )}
       <div className="teams">
-        <TeamPanel state={state} team="BLUE" picks={state.teams.BLUE} phase={state.phase} onSwap={handleSwap} />
-        <TeamPanel state={state} team="RED" picks={state.teams.RED} phase={state.phase} onSwap={handleSwap} />
+        <TeamPanel state={state} team="BLUE" picks={state.teams.BLUE} phase={state.phase} selectedTeam={selectedTeam} onSwap={handleSwap} />
+        <TeamPanel state={state} team="RED" picks={state.teams.RED} phase={state.phase} selectedTeam={selectedTeam} onSwap={handleSwap} />
       </div>
       <button className="reset" onClick={handleReset}>드래프트 초기화</button>
     </main>
   );
 }
+
