@@ -8,6 +8,7 @@ const HOST = "0.0.0.0";
 const MATCH_MIN = 1;
 const MATCH_MAX = 999;
 const MATCH_CAPACITY = 10;
+const SWAP_DURATION_MS = 60 * 1000;
 const PICK_ORDER = ["BLUE", "RED", "RED", "BLUE", "BLUE", "RED", "RED", "BLUE", "BLUE", "RED"];
 const FALLBACK_VERSION = "16.9.1";
 const FALLBACK_CHAMPIONS = [
@@ -64,6 +65,7 @@ function createInitialState() {
     currentTeam: PICK_ORDER[0],
     offeredChampions: firstOffer,
     unseenPool: unseenPool.filter((c) => !firstOffer.includes(c)),
+    swapEndsAt: null,
     championVersion,
     championCatalog
   };
@@ -73,6 +75,7 @@ function createMatch(code) {
   return {
     code,
     sockets: new Set(),
+    swapTimer: null,
     gameState: createInitialState()
   };
 }
@@ -99,6 +102,20 @@ function refreshOfferedChampions(match) {
   match.gameState.unseenPool = match.gameState.unseenPool.filter((c) => !nextOffer.includes(c));
 }
 
+function finishSwapPhase(match) {
+  if (match.gameState.phase !== "SWAP") return;
+  match.gameState.phase = "COMPLETE";
+  match.gameState.swapEndsAt = null;
+  match.swapTimer = null;
+  broadcastMatchState(match.code);
+}
+
+function startSwapTimer(match) {
+  if (match.swapTimer) clearTimeout(match.swapTimer);
+  match.gameState.swapEndsAt = Date.now() + SWAP_DURATION_MS;
+  match.swapTimer = setTimeout(() => finishSwapPhase(match), SWAP_DURATION_MS);
+}
+
 function leaveMatch(socket) {
   const code = socket.data.matchCode;
   if (!code) return;
@@ -110,6 +127,7 @@ function leaveMatch(socket) {
 
   match.sockets.delete(socket.id);
   if (match.sockets.size === 0) {
+    if (match.swapTimer) clearTimeout(match.swapTimer);
     matches.delete(code);
     return;
   }
@@ -142,6 +160,7 @@ async function loadChampionData() {
     championCatalog = nextCatalog;
 
     for (const match of matches.values()) {
+      if (match.swapTimer) clearTimeout(match.swapTimer);
       match.gameState = createInitialState();
       broadcastMatchState(match.code);
     }
@@ -228,6 +247,7 @@ io.on("connection", (socket) => {
       state.phase = "SWAP";
       state.currentTeam = null;
       state.offeredChampions = [];
+      startSwapTimer(match);
     } else {
       state.currentTeam = state.pickOrder[state.turnIndex];
       refreshOfferedChampions(match);
@@ -244,6 +264,10 @@ io.on("connection", (socket) => {
     const state = match.gameState;
 
     if (state.phase !== "SWAP") return;
+    if (Date.now() >= state.swapEndsAt) {
+      finishSwapPhase(match);
+      return;
+    }
     if (!["BLUE", "RED"].includes(team)) return;
     if (socket.data.selectedTeam !== team) return;
 
@@ -266,6 +290,7 @@ io.on("connection", (socket) => {
     if (!code) return;
     const match = matches.get(code);
     if (!match) return;
+    if (match.swapTimer) clearTimeout(match.swapTimer);
     match.gameState = createInitialState();
     broadcastMatchState(code);
   });
