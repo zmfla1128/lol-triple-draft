@@ -7,7 +7,7 @@ const PORT = 4000;
 const HOST = "0.0.0.0";
 const MATCH_MIN = 1;
 const MATCH_MAX = 999;
-const MATCH_CAPACITY = 10;
+const MATCH_CAPACITY = 2;
 const SWAP_DURATION_MS = 60 * 1000;
 const PICK_ORDER = ["BLUE", "RED", "RED", "BLUE", "BLUE", "RED", "RED", "BLUE", "BLUE", "RED"];
 const FALLBACK_VERSION = "16.9.1";
@@ -92,6 +92,13 @@ function getClientState(match) {
     earlyFinishVoteCount: match.earlyFinishVotes.size,
     earlyFinishVotesRequired: getEarlyFinishVotesRequired(match)
   };
+}
+
+function isTeamTaken(match, team, socketId) {
+  return [...match.sockets].some((id) => {
+    if (id === socketId) return false;
+    return io.sockets.sockets.get(id)?.data.selectedTeam === team;
+  });
 }
 
 function broadcastMatchState(code) {
@@ -247,6 +254,12 @@ io.on("connection", (socket) => {
   socket.on("team:select", ({ team }) => {
     if (!socket.data.matchCode) return;
     if (!["BLUE", "RED"].includes(team)) return;
+    const match = matches.get(socket.data.matchCode);
+    if (!match) return;
+    if (isTeamTaken(match, team, socket.id)) {
+      socket.emit("match:error", { message: "이미 다른 참가자가 선택한 팀입니다." });
+      return;
+    }
     socket.data.selectedTeam = team;
     socket.emit("team:selected", { team });
   });

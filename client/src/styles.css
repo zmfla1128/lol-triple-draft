@@ -162,6 +162,10 @@ h1 {
   margin-top: 12px;
 }
 
+.early-finish span {
+  transform: translateY(3px);
+}
+
 .team-choice {
   display: flex;
   gap: 12px;

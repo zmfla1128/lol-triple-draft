@@ -65,6 +65,7 @@ export default function App() {
     const onState = (nextState) => {
       setCurrentTime(Date.now());
       setState(nextState);
+      if (nextState.phase !== "SWAP") setHasEarlyFinishVote(false);
     };
     const onTeamSelected = ({ team }) => setSelectedTeam(team);
     const onMatchJoined = ({ code }) => {
@@ -121,7 +122,6 @@ export default function App() {
   };
 
   const handleTeamSelect = (team) => {
-    setSelectedTeam(team);
     socket.emit("team:select", { team });
   };
 
@@ -130,6 +130,7 @@ export default function App() {
   };
 
   const handleEarlyFinishVote = () => {
+    setHasEarlyFinishVote((hasVoted) => !hasVoted);
     socket.emit("swap:vote");
   };
 
