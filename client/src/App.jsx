@@ -108,12 +108,15 @@ export default function App() {
   const swapSecondsRemaining = state?.swapEndsAt
     ? Math.max(0, Math.ceil((state.swapEndsAt - currentTime) / 1000))
     : 0;
+  const draftSecondsRemaining = state?.pickEndsAt
+    ? Math.max(0, Math.ceil((state.pickEndsAt - currentTime) / 1000))
+    : 0;
 
   useEffect(() => {
-    if (state?.phase !== "SWAP" || !state.swapEndsAt) return undefined;
+    if (!state?.pickEndsAt && !state?.swapEndsAt) return undefined;
     const timer = setInterval(() => setCurrentTime(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [state?.phase, state?.swapEndsAt]);
+  }, [state?.pickEndsAt, state?.swapEndsAt]);
 
   const handleJoinMatch = () => {
     const trimmed = matchCodeInput.trim();
@@ -199,7 +202,7 @@ export default function App() {
       </div>
       {state.phase === "DRAFT" && (
         <section className="offers">
-          <h3>챔피언 1명 선택 ({TEAM_LABELS[state.currentTeam]})</h3>
+          <h3>챔피언 1명 선택 ({TEAM_LABELS[state.currentTeam]}) - {draftSecondsRemaining}초 남음</h3>
           <div className="cards">
             {state.offeredChampions.map((championId) => {
               const meta = getMeta(state, championId);

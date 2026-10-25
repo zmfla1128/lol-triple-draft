@@ -8,6 +8,7 @@ const HOST = "0.0.0.0";
 const MATCH_MIN = 1;
 const MATCH_MAX = 999;
 const MATCH_CAPACITY = 2;
+const DRAFT_DURATION_MS = 30 * 1000;
 const SWAP_DURATION_MS = 60 * 1000;
 const PICK_ORDER = ["BLUE", "RED", "RED", "BLUE", "BLUE", "RED", "RED", "BLUE", "BLUE", "RED"];
 const FALLBACK_VERSION = "16.9.1";
@@ -67,6 +68,7 @@ function createInitialState() {
     offeredChampions: firstOffer,
     unseenPool: unseenPool.filter((c) => !firstOffer.includes(c)),
     seenChampions: [...firstOffer],
+    pickEndsAt: null,
     swapEndsAt: null,
     championVersion,
     championCatalog
@@ -78,6 +80,7 @@ function createMatch(code) {
     code,
     sockets: new Set(),
     earlyFinishVotes: new Set(),
+    pickTimer: null,
     swapTimer: null,
     gameState: createInitialState()
   };
@@ -128,6 +131,40 @@ function refreshOfferedChampions(match) {
   state.unseenPool = candidatePool.filter((champion) => !nextOffer.includes(champion));
 }
 
+function finishDraftPick(match, champion) {
+  const state = match.gameState;
+  if (state.phase !== "DRAFT" || !state.offeredChampions.includes(champion)) return;
+
+  if (match.pickTimer) clearTimeout(match.pickTimer);
+  match.pickTimer = null;
+  state.pickEndsAt = null;
+  state.teams[state.currentTeam].push(champion);
+  state.turnIndex += 1;
+
+  if (state.turnIndex >= state.pickOrder.length) {
+    state.phase = "SWAP";
+    state.currentTeam = null;
+    state.offeredChampions = [];
+    state.swapEndedByVote = false;
+    match.earlyFinishVotes.clear();
+    startSwapTimer(match);
+  } else {
+    state.currentTeam = state.pickOrder[state.turnIndex];
+    refreshOfferedChampions(match);
+    startDraftTimer(match);
+  }
+  broadcastMatchState(match.code);
+}
+
+function startDraftTimer(match) {
+  if (match.pickTimer) clearTimeout(match.pickTimer);
+  match.gameState.pickEndsAt = Date.now() + DRAFT_DURATION_MS;
+  match.pickTimer = setTimeout(() => {
+    const { offeredChampions } = match.gameState;
+    if (offeredChampions.length) finishDraftPick(match, offeredChampions[Math.floor(Math.random() * offeredChampions.length)]);
+  }, DRAFT_DURATION_MS);
+}
+
 function finishSwapPhase(match, endedByVote = false) {
   if (match.gameState.phase !== "SWAP") return;
   match.gameState.phase = "COMPLETE";
@@ -157,6 +194,7 @@ function leaveMatch(socket) {
   match.earlyFinishVotes.delete(socket.id);
   if (selectedTeam) match.gameState.readyTeams[selectedTeam] = false;
   if (match.sockets.size === 0) {
+    if (match.pickTimer) clearTimeout(match.pickTimer);
     if (match.swapTimer) clearTimeout(match.swapTimer);
     matches.delete(code);
     return;
@@ -191,6 +229,7 @@ async function loadChampionData() {
     championCatalog = nextCatalog;
 
     for (const match of matches.values()) {
+      if (match.pickTimer) clearTimeout(match.pickTimer);
       if (match.swapTimer) clearTimeout(match.swapTimer);
       match.earlyFinishVotes.clear();
       match.gameState = createInitialState();
@@ -277,6 +316,7 @@ io.on("connection", (socket) => {
     match.gameState.readyTeams[team] = !match.gameState.readyTeams[team];
     if (match.gameState.readyTeams.BLUE && match.gameState.readyTeams.RED) {
       match.gameState.phase = "DRAFT";
+      startDraftTimer(match);
     }
     broadcastMatchState(code);
   });
@@ -313,23 +353,7 @@ io.on("connection", (socket) => {
     if (socket.data.selectedTeam !== state.currentTeam) return;
     if (!state.offeredChampions.includes(champion)) return;
 
-    const team = state.currentTeam;
-    state.teams[team].push(champion);
-    state.turnIndex += 1;
-
-    if (state.turnIndex >= state.pickOrder.length) {
-      state.phase = "SWAP";
-      state.currentTeam = null;
-      state.offeredChampions = [];
-      state.swapEndedByVote = false;
-      match.earlyFinishVotes.clear();
-      startSwapTimer(match);
-    } else {
-      state.currentTeam = state.pickOrder[state.turnIndex];
-      refreshOfferedChampions(match);
-    }
-
-    broadcastMatchState(code);
+    finishDraftPick(match, champion);
   });
 
   socket.on("swap:move", ({ team, fromIndex, toIndex }) => {
@@ -366,6 +390,7 @@ io.on("connection", (socket) => {
     if (!code) return;
     const match = matches.get(code);
     if (!match) return;
+    if (match.pickTimer) clearTimeout(match.pickTimer);
     if (match.swapTimer) clearTimeout(match.swapTimer);
     match.earlyFinishVotes.clear();
     match.gameState = createInitialState();

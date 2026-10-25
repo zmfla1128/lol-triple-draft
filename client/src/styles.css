@@ -166,6 +166,21 @@ h1 {
   transform: translateY(6px);
 }
 
+.ready-stage {
+  display: grid;
+  gap: 16px;
+}
+
+.ready-stage h3,
+.ready-stage p,
+.ready-stage .reset {
+  margin: 0;
+}
+
+.ready-stage .reset {
+  justify-self: start;
+}
+
 .team-choice {
   display: flex;
   gap: 12px;
