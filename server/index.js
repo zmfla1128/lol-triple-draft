@@ -196,6 +196,11 @@ io.on("connection", (socket) => {
     broadcastMatchInfo(parsed);
   });
 
+  socket.on("match:leave", () => {
+    leaveMatch(socket);
+    socket.emit("match:left");
+  });
+
   socket.on("team:select", ({ team }) => {
     if (!socket.data.matchCode) return;
     if (!["BLUE", "RED"].includes(team)) return;
@@ -240,6 +245,7 @@ io.on("connection", (socket) => {
 
     if (state.phase !== "SWAP") return;
     if (!["BLUE", "RED"].includes(team)) return;
+    if (socket.data.selectedTeam !== team) return;
 
     const arr = state.teams[team];
     if (!Array.isArray(arr)) return;
@@ -277,3 +283,4 @@ server.listen(PORT, HOST, () => {
   console.log(`Server listening on http://${HOST}:${PORT}`);
   loadChampionData();
 });
+
