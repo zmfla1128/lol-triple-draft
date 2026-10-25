@@ -379,7 +379,7 @@ io.on("connection", (socket) => {
     const code = socket.data.matchCode;
     if (!code) return;
     const match = matches.get(code);
-    if (!match || !["DRAFT", "SWAP"].includes(match.gameState.phase)) return;
+    if (!match || !["DRAFT", "SWAP", "COMPLETE"].includes(match.gameState.phase)) return;
 
     if (match.resetVotes.has(socket.id)) {
       match.resetVotes.delete(socket.id);

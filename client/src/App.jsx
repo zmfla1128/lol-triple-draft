@@ -76,7 +76,7 @@ export default function App() {
       setCurrentTime(Date.now());
       setState(nextState);
       if (nextState.phase !== "SWAP") setHasEarlyFinishVote(false);
-      if (!["DRAFT", "SWAP"].includes(nextState.phase)) setHasResetVote(false);
+      if (!["DRAFT", "SWAP", "COMPLETE"].includes(nextState.phase)) setHasResetVote(false);
     };
     const onTeamSelected = ({ team }) => setSelectedTeam(team);
     const onMatchJoined = ({ code }) => {
@@ -265,7 +265,7 @@ export default function App() {
         <TeamPanel state={state} team="BLUE" picks={state.teams.BLUE} phase={state.phase} selectedTeam={selectedTeam} onSwap={handleSwap} />
         <TeamPanel state={state} team="RED" picks={state.teams.RED} phase={state.phase} selectedTeam={selectedTeam} onSwap={handleSwap} />
       </div>
-      {["DRAFT", "SWAP"].includes(state.phase) && (
+      {["DRAFT", "SWAP", "COMPLETE"].includes(state.phase) && (
         <div className="reset-vote">
           <button className="reset" onClick={handleReset}>
             {hasResetVote ? "초기화 동의 취소" : "드래프트 초기화 동의"}
