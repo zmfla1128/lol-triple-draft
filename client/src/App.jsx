@@ -134,6 +134,8 @@ export default function App() {
     socket.emit("swap:vote");
   };
 
+  const handleReady = () => socket.emit("match:ready");
+
   if (!joinedCode) {
     return (
       <main className="page">
@@ -210,6 +212,16 @@ export default function App() {
             })}
           </div>
           {state.currentTeam !== selectedTeam && <p className="turn-wait">상대 팀 턴입니다. 잠시 기다려주세요.</p>}
+        </section>
+      )}
+      {state.phase === "READY" && (
+        <section className="offers ready-stage">
+          <h3>양 팀이 준비 완료하면 드래프트를 시작합니다.</h3>
+          <p>블루 팀: {state.readyTeams?.BLUE ? "준비 완료" : "준비 중"}</p>
+          <p>레드 팀: {state.readyTeams?.RED ? "준비 완료" : "준비 중"}</p>
+          <button className="reset" onClick={handleReady}>
+            {state.readyTeams?.[selectedTeam] ? "준비 완료 취소" : "준비 완료"}
+          </button>
         </section>
       )}
       {state.phase === "SWAP" && (

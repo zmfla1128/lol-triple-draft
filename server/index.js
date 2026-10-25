@@ -58,8 +58,9 @@ function createInitialState() {
   const unseenPool = [...championPool];
   const firstOffer = pickRandomThree(unseenPool);
   return {
-    phase: "DRAFT",
+    phase: "READY",
     teams: { BLUE: [], RED: [] },
+    readyTeams: { BLUE: false, RED: false },
     pickOrder: PICK_ORDER,
     turnIndex: 0,
     currentTeam: PICK_ORDER[0],
@@ -146,6 +147,7 @@ function leaveMatch(socket) {
   const code = socket.data.matchCode;
   if (!code) return;
   const match = matches.get(code);
+  const selectedTeam = socket.data.selectedTeam;
   socket.leave(getRoomName(code));
   socket.data.matchCode = null;
   socket.data.selectedTeam = null;
@@ -153,6 +155,7 @@ function leaveMatch(socket) {
 
   match.sockets.delete(socket.id);
   match.earlyFinishVotes.delete(socket.id);
+  if (selectedTeam) match.gameState.readyTeams[selectedTeam] = false;
   if (match.sockets.size === 0) {
     if (match.swapTimer) clearTimeout(match.swapTimer);
     matches.delete(code);
@@ -230,7 +233,7 @@ io.on("connection", (socket) => {
       matches.set(parsed, match);
     }
     if (match.sockets.size >= MATCH_CAPACITY) {
-      socket.emit("match:error", { message: "해당 방은 이미 10명입니다." });
+      socket.emit("match:error", { message: "해당 방은 이미 2명입니다." });
       return;
     }
 
@@ -262,6 +265,20 @@ io.on("connection", (socket) => {
     }
     socket.data.selectedTeam = team;
     socket.emit("team:selected", { team });
+  });
+
+  socket.on("match:ready", () => {
+    const code = socket.data.matchCode;
+    const team = socket.data.selectedTeam;
+    if (!code || !team) return;
+    const match = matches.get(code);
+    if (!match || match.gameState.phase !== "READY") return;
+
+    match.gameState.readyTeams[team] = !match.gameState.readyTeams[team];
+    if (match.gameState.readyTeams.BLUE && match.gameState.readyTeams.RED) {
+      match.gameState.phase = "DRAFT";
+    }
+    broadcastMatchState(code);
   });
 
   socket.on("swap:vote", () => {
