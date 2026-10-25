@@ -164,6 +164,21 @@ h1 {
   transform: translateY(6px);
 }
 
+.swap-notice {
+  margin: 16px 0 0;
+  color: #687480;
+}
+
+.reset-vote {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.reset-vote span {
+  transform: translateY(8px);
+}
+
 .ready-stage {
   display: grid;
   gap: 16px;

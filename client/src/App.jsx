@@ -63,6 +63,7 @@ export default function App() {
   const [state, setState] = useState(null);
   const [currentTime, setCurrentTime] = useState(Date.now());
   const [hasEarlyFinishVote, setHasEarlyFinishVote] = useState(false);
+  const [hasResetVote, setHasResetVote] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState(null);
   const [matchCodeInput, setMatchCodeInput] = useState("");
   const [joinedCode, setJoinedCode] = useState(null);
@@ -75,6 +76,7 @@ export default function App() {
       setCurrentTime(Date.now());
       setState(nextState);
       if (nextState.phase !== "SWAP") setHasEarlyFinishVote(false);
+      if (!["DRAFT", "SWAP"].includes(nextState.phase)) setHasResetVote(false);
     };
     const onTeamSelected = ({ team }) => setSelectedTeam(team);
     const onMatchJoined = ({ code }) => {
@@ -93,6 +95,7 @@ export default function App() {
     };
     const onMatchError = ({ message }) => setMatchError(message || "방 입장에 실패했습니다.");
     const onVoteStatus = ({ hasVoted }) => setHasEarlyFinishVote(hasVoted);
+    const onResetVoteStatus = ({ hasVoted }) => setHasResetVote(hasVoted);
 
     socket.on("state:update", onState);
     socket.on("team:selected", onTeamSelected);
@@ -101,6 +104,7 @@ export default function App() {
     socket.on("match:left", onMatchLeft);
     socket.on("match:error", onMatchError);
     socket.on("swap:vote-status", onVoteStatus);
+    socket.on("reset:vote-status", onResetVoteStatus);
 
     return () => {
       socket.off("state:update", onState);
@@ -110,6 +114,7 @@ export default function App() {
       socket.off("match:left", onMatchLeft);
       socket.off("match:error", onMatchError);
       socket.off("swap:vote-status", onVoteStatus);
+      socket.off("reset:vote-status", onResetVoteStatus);
     };
   }, []);
 
@@ -196,7 +201,10 @@ export default function App() {
   };
 
   const handleSwap = (team, fromIndex, toIndex) => socket.emit("swap:move", { team, fromIndex, toIndex });
-  const handleReset = () => socket.emit("game:reset");
+  const handleReset = () => {
+    setHasResetVote((hasVoted) => !hasVoted);
+    socket.emit("game:reset-vote");
+  };
 
   return (
     <main className="page">
@@ -245,6 +253,7 @@ export default function App() {
             </button>
             <span>찬성 {state.earlyFinishVoteCount || 0} / {state.earlyFinishVotesRequired || 1}</span>
           </div>
+          <p className="swap-notice">상대 팀의 라인 배치는 스왑 단계 종료 후 공개됩니다.</p>
         </section>
       )}
       {state.phase === "COMPLETE" && (
@@ -256,7 +265,14 @@ export default function App() {
         <TeamPanel state={state} team="BLUE" picks={state.teams.BLUE} phase={state.phase} selectedTeam={selectedTeam} onSwap={handleSwap} />
         <TeamPanel state={state} team="RED" picks={state.teams.RED} phase={state.phase} selectedTeam={selectedTeam} onSwap={handleSwap} />
       </div>
-      <button className="reset" onClick={handleReset}>드래프트 초기화</button>
+      {["DRAFT", "SWAP"].includes(state.phase) && (
+        <div className="reset-vote">
+          <button className="reset" onClick={handleReset}>
+            {hasResetVote ? "초기화 동의 취소" : "드래프트 초기화 동의"}
+          </button>
+          <span>초기화 동의: 블루 팀 {state.resetVoteTeams?.BLUE ? "완료" : "대기"} / 레드 팀 {state.resetVoteTeams?.RED ? "완료" : "대기"}</span>
+        </div>
+      )}
     </main>
   );
 }

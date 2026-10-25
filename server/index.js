@@ -81,6 +81,7 @@ function createMatch(code) {
     code,
     sockets: new Set(),
     earlyFinishVotes: new Set(),
+    resetVotes: new Set(),
     pickTimer: null,
     swapTimer: null,
     gameState: createInitialState()
@@ -89,6 +90,15 @@ function createMatch(code) {
 
 function getEarlyFinishVotesRequired(match) {
   return Math.floor(match.sockets.size / 2) + 1;
+}
+
+function getResetVoteTeams(match) {
+  const teams = { BLUE: false, RED: false };
+  for (const socketId of match.resetVotes) {
+    const team = io.sockets.sockets.get(socketId)?.data.selectedTeam;
+    if (team) teams[team] = true;
+  }
+  return teams;
 }
 
 function getClientState(match, selectedTeam = null) {
@@ -105,7 +115,8 @@ function getClientState(match, selectedTeam = null) {
     ...state,
     teams,
     earlyFinishVoteCount: match.earlyFinishVotes.size,
-    earlyFinishVotesRequired: getEarlyFinishVotesRequired(match)
+    earlyFinishVotesRequired: getEarlyFinishVotesRequired(match),
+    resetVoteTeams: getResetVoteTeams(match)
   };
 }
 
@@ -210,6 +221,7 @@ function leaveMatch(socket) {
 
   match.sockets.delete(socket.id);
   match.earlyFinishVotes.delete(socket.id);
+  match.resetVotes.delete(socket.id);
   if (selectedTeam) match.gameState.readyTeams[selectedTeam] = false;
   if (match.sockets.size === 0) {
     if (match.pickTimer) clearTimeout(match.pickTimer);
@@ -250,6 +262,7 @@ async function loadChampionData() {
       if (match.pickTimer) clearTimeout(match.pickTimer);
       if (match.swapTimer) clearTimeout(match.swapTimer);
       match.earlyFinishVotes.clear();
+      match.resetVotes.clear();
       match.gameState = createInitialState();
       broadcastMatchState(match.code);
     }
@@ -277,6 +290,7 @@ io.on("connection", (socket) => {
         socket.emit("match:joined", { code: parsed });
         socket.emit("state:update", getClientState(existing, socket.data.selectedTeam));
         socket.emit("swap:vote-status", { hasVoted: existing.earlyFinishVotes.has(socket.id) });
+        socket.emit("reset:vote-status", { hasVoted: existing.resetVotes.has(socket.id) });
         broadcastMatchInfo(parsed);
       }
       return;
@@ -303,6 +317,7 @@ io.on("connection", (socket) => {
     socket.emit("team:selected", { team: null });
     socket.emit("state:update", getClientState(match, socket.data.selectedTeam));
     socket.emit("swap:vote-status", { hasVoted: false });
+    socket.emit("reset:vote-status", { hasVoted: false });
     broadcastMatchInfo(parsed);
   });
 
@@ -360,6 +375,30 @@ io.on("connection", (socket) => {
     broadcastMatchState(code);
   });
 
+  socket.on("game:reset-vote", () => {
+    const code = socket.data.matchCode;
+    if (!code) return;
+    const match = matches.get(code);
+    if (!match || !["DRAFT", "SWAP"].includes(match.gameState.phase)) return;
+
+    if (match.resetVotes.has(socket.id)) {
+      match.resetVotes.delete(socket.id);
+    } else {
+      match.resetVotes.add(socket.id);
+    }
+    socket.emit("reset:vote-status", { hasVoted: match.resetVotes.has(socket.id) });
+
+    const resetVoteTeams = getResetVoteTeams(match);
+    if (resetVoteTeams.BLUE && resetVoteTeams.RED) {
+      if (match.pickTimer) clearTimeout(match.pickTimer);
+      if (match.swapTimer) clearTimeout(match.swapTimer);
+      match.earlyFinishVotes.clear();
+      match.resetVotes.clear();
+      match.gameState = createInitialState();
+    }
+    broadcastMatchState(code);
+  });
+
   socket.on("draft:pick", ({ champion }) => {
     const code = socket.data.matchCode;
     if (!code) return;
@@ -401,18 +440,6 @@ io.on("connection", (socket) => {
     next.splice(toIndex, 0, moved);
     state.teams[team] = next;
 
-    broadcastMatchState(code);
-  });
-
-  socket.on("game:reset", () => {
-    const code = socket.data.matchCode;
-    if (!code) return;
-    const match = matches.get(code);
-    if (!match) return;
-    if (match.pickTimer) clearTimeout(match.pickTimer);
-    if (match.swapTimer) clearTimeout(match.swapTimer);
-    match.earlyFinishVotes.clear();
-    match.gameState = createInitialState();
     broadcastMatchState(code);
   });
 
