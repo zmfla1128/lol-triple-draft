@@ -70,6 +70,7 @@ function createInitialState() {
     seenChampions: [...firstOffer],
     pickEndsAt: null,
     swapEndsAt: null,
+    swapStartTeams: null,
     championVersion,
     championCatalog
   };
@@ -90,9 +91,19 @@ function getEarlyFinishVotesRequired(match) {
   return Math.floor(match.sockets.size / 2) + 1;
 }
 
-function getClientState(match) {
+function getClientState(match, selectedTeam = null) {
+  const state = match.gameState;
+  const teams = {
+    BLUE: [...state.teams.BLUE],
+    RED: [...state.teams.RED]
+  };
+  if (state.phase === "SWAP" && selectedTeam && state.swapStartTeams) {
+    const opponent = selectedTeam === "BLUE" ? "RED" : "BLUE";
+    teams[opponent] = [...state.swapStartTeams[opponent]];
+  }
   return {
-    ...match.gameState,
+    ...state,
+    teams,
     earlyFinishVoteCount: match.earlyFinishVotes.size,
     earlyFinishVotesRequired: getEarlyFinishVotesRequired(match)
   };
@@ -108,7 +119,10 @@ function isTeamTaken(match, team, socketId) {
 function broadcastMatchState(code) {
   const match = matches.get(code);
   if (!match) return;
-  io.to(getRoomName(code)).emit("state:update", getClientState(match));
+  for (const socketId of match.sockets) {
+    const socket = io.sockets.sockets.get(socketId);
+    socket?.emit("state:update", getClientState(match, socket?.data.selectedTeam));
+  }
 }
 
 function broadcastMatchInfo(code) {
@@ -142,6 +156,10 @@ function finishDraftPick(match, champion) {
   state.turnIndex += 1;
 
   if (state.turnIndex >= state.pickOrder.length) {
+    state.swapStartTeams = {
+      BLUE: [...state.teams.BLUE],
+      RED: [...state.teams.RED]
+    };
     state.phase = "SWAP";
     state.currentTeam = null;
     state.offeredChampions = [];
@@ -257,7 +275,7 @@ io.on("connection", (socket) => {
       const existing = matches.get(parsed);
       if (existing) {
         socket.emit("match:joined", { code: parsed });
-        socket.emit("state:update", getClientState(existing));
+        socket.emit("state:update", getClientState(existing, socket.data.selectedTeam));
         socket.emit("swap:vote-status", { hasVoted: existing.earlyFinishVotes.has(socket.id) });
         broadcastMatchInfo(parsed);
       }
@@ -283,7 +301,7 @@ io.on("connection", (socket) => {
 
     socket.emit("match:joined", { code: parsed });
     socket.emit("team:selected", { team: null });
-    socket.emit("state:update", getClientState(match));
+    socket.emit("state:update", getClientState(match, socket.data.selectedTeam));
     socket.emit("swap:vote-status", { hasVoted: false });
     broadcastMatchInfo(parsed);
   });
@@ -304,6 +322,7 @@ io.on("connection", (socket) => {
     }
     socket.data.selectedTeam = team;
     socket.emit("team:selected", { team });
+    socket.emit("state:update", getClientState(match, team));
   });
 
   socket.on("match:ready", () => {

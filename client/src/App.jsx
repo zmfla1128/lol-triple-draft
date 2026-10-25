@@ -37,10 +37,19 @@ function TeamPanel({ state, team, picks, phase, selectedTeam, onSwap }) {
                 )}
               </span>
               {phase === "SWAP" && selectedTeam === team && championId && (
-                <span className="swap-buttons">
-                  <button disabled={idx === 0} onClick={() => onSwap(team, idx, idx - 1)}>위</button>
-                  <button disabled={idx === ROLE_LABELS.length - 1 || !picks[idx + 1]} onClick={() => onSwap(team, idx, idx + 1)}>아래</button>
-                </span>
+                <select
+                  className="role-select"
+                  value=""
+                  aria-label={`${meta.kr} 라인 이동`}
+                  onChange={(event) => onSwap(team, idx, Number(event.target.value))}
+                >
+                  <option value="" disabled>라인 이동</option>
+                  {ROLE_LABELS.map((targetRole, targetIndex) => (
+                    <option key={targetRole} value={targetIndex} disabled={targetIndex === idx}>
+                      {targetRole}
+                    </option>
+                  ))}
+                </select>
               )}
             </li>
           );
@@ -229,7 +238,7 @@ export default function App() {
       )}
       {state.phase === "SWAP" && (
         <section className="offers">
-          <h3>스왑 단계: 내 팀 챔피언 순서를 변경하세요 ({swapSecondsRemaining}초 남음)</h3>
+          <h3>스왑 단계: 원하는 라인을 선택해 내 팀 챔피언을 이동하세요 ({swapSecondsRemaining}초 남음)</h3>
           <div className="early-finish">
             <button className="reset" onClick={handleEarlyFinishVote}>
               {hasEarlyFinishVote ? "조기 종료 투표 취소" : "조기 종료 투표"}
