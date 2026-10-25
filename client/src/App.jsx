@@ -4,7 +4,7 @@ import { io } from "socket.io-client";
 const socket = io(import.meta.env.VITE_SOCKET_URL || `http://${window.location.hostname}:4000`);
 
 const TEAM_LABELS = { BLUE: "블루 팀", RED: "레드 팀" };
-const PHASE_LABELS = { DRAFT: "드래프트", SWAP: "스왑" };
+const PHASE_LABELS = { DRAFT: "드래프트", SWAP: "스왑", COMPLETE: "완료" };
 const ROLE_LABELS = ["탑", "정글", "미드", "원딜", "서폿"];
 
 const getMeta = (state, championId) => state?.championCatalog?.[championId] || { id: championId, kr: championId };
@@ -52,6 +52,7 @@ function TeamPanel({ state, team, picks, phase, selectedTeam, onSwap }) {
 
 export default function App() {
   const [state, setState] = useState(null);
+  const [currentTime, setCurrentTime] = useState(Date.now());
   const [selectedTeam, setSelectedTeam] = useState(null);
   const [matchCodeInput, setMatchCodeInput] = useState("");
   const [joinedCode, setJoinedCode] = useState(null);
@@ -96,6 +97,15 @@ export default function App() {
   }, []);
 
   const pickCount = useMemo(() => (!state ? 0 : state.teams.BLUE.length + state.teams.RED.length), [state]);
+  const swapSecondsRemaining = state?.swapEndsAt
+    ? Math.max(0, Math.ceil((state.swapEndsAt - currentTime) / 1000))
+    : 0;
+
+  useEffect(() => {
+    if (state?.phase !== "SWAP" || !state.swapEndsAt) return undefined;
+    const timer = setInterval(() => setCurrentTime(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [state?.phase, state?.swapEndsAt]);
 
   const handleJoinMatch = () => {
     const trimmed = matchCodeInput.trim();
@@ -192,7 +202,7 @@ export default function App() {
       )}
       {state.phase === "SWAP" && (
         <section className="offers">
-          <h3>스왑 단계: 같은 팀 내 챔피언 순서를 변경하세요</h3>
+          <h3>스왑 단계: 내 팀 챔피언 순서를 변경하세요 ({swapSecondsRemaining}초 남음)</h3>
         </section>
       )}
       <div className="teams">
